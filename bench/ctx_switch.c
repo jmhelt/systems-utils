@@ -8,6 +8,55 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <string.h>
+#include <linux/perf_event.h>
+#include <asm/unistd.h>
+#include <sys/ioctl.h>
+
+static long
+perf_event_open(struct perf_event_attr *hw_event, pid_t pid,
+		int cpu, int group_fd, unsigned long flags)
+{
+  int ret;
+
+  ret = syscall(__NR_perf_event_open, hw_event, pid, cpu,
+		group_fd, flags);
+  return ret;
+}
+
+int
+perf_event_start()
+{
+  int fd;
+  struct perf_event_attr pe;
+
+  memset(&pe, 0, sizeof(struct perf_event_attr));
+  pe.type = PERF_TYPE_HARDWARE;
+  pe.size = sizeof(struct perf_event_attr);
+  pe.config = PERF_COUNT_HW_INSTRUCTIONS;
+  pe.disabled = 1;
+  pe.exclude_kernel = 1;
+  pe.exclude_hv = 1;
+
+  fd = perf_event_open(&pe, 0, -1, -1, 0);
+  if (fd == -1) {
+    fprintf(stderr, "Error opening leader %llx\n", pe.config);
+    exit(EXIT_FAILURE);
+  }
+
+  ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+  ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+
+  return fd;
+}
+
+void
+perf_event_stop(int fd)
+{
+  ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+  close(fd);
+}
+
 #define BUF_LEN 1
 
 struct thread_arg {
@@ -33,6 +82,8 @@ void *thread_main(void *arg)
 	int wfd = targ->wfd;
 	ssize_t n;
 
+	//int fd = perf_event_start();
+
 	for (i = 0; i < niters; i++) {
 		n = read(rfd, buf, BUF_LEN);
 		if (n != BUF_LEN)
@@ -42,6 +93,8 @@ void *thread_main(void *arg)
 		if (n != BUF_LEN)
 			handle_error("thread write");
 	}
+
+	//perf_event_stop(fd);
 
 	return EXIT_SUCCESS;
 }
@@ -136,6 +189,8 @@ void run_bench(int rfd, int wfd, int nwarmups, int nswitch, int nthreads)
 	struct timespec start;
 	uint64_t delta;
 
+	//int fd = perf_event_start();
+
 	warmup(rfd, wfd, nwarmups);
 
 	clock_gettime(CLOCK_REALTIME, &start);
@@ -147,6 +202,8 @@ void run_bench(int rfd, int wfd, int nwarmups, int nswitch, int nthreads)
 			handle_error("read");
 	}
 	clock_gettime(CLOCK_REALTIME, &end);
+
+	//perf_event_stop(fd);
 
 	delta = 1e9 * (end.tv_sec - start.tv_sec)
 		+ end.tv_nsec - start.tv_nsec;
@@ -191,6 +248,8 @@ int main(int argc, char **argv)
 
 	if (nswitch == -1 || nthreads == -1)
 		print_usage(argv[0]);
+
+	printf("pid: %d\n", getpid());
 
 	args = calloc((size_t)nthreads, sizeof(struct thread_arg));
 	if (args == NULL)
