@@ -1,0 +1,7 @@
+#!/bin/bash
+
+E_FATAL=1
+E_INVALID_ARGUMENT=100
+
+E_NOT_FOUND=101
+
